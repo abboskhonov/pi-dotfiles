@@ -10,8 +10,7 @@ Personal dotfiles and configuration for the [pi coding agent](https://github.com
 | `.pi/agent/models.json` | Custom model/provider definitions |
 | `.pi/agent/themes/blue-minimal.json` | Custom blue-minimal terminal theme |
 | `.pi/agent/extensions/blue-minimal-header.ts` | Custom header/footer extension |
-| `.agents/.skill-lock.json` | Installed skills registry |
-| `.agents/skills/` | Installed pi skills |
+
 
 ## Excluded (sensitive/private)
 
@@ -28,7 +27,6 @@ git clone https://github.com/abboskhonov/pi-dotfiles.git ~/pi-dotfiles
 
 # Copy files to their locations (backup originals first)
 cp -r ~/pi-dotfiles/.pi ~/.pi
-cp -r ~/pi-dotfiles/.agents ~/.agents
 ```
 
 ## License
