@@ -10,6 +10,7 @@ Personal dotfiles and configuration for the [pi coding agent](https://github.com
 | `.pi/agent/models.json` | Custom model/provider definitions |
 | `.pi/agent/themes/blue-minimal.json` | Custom blue-minimal terminal theme |
 | `.pi/agent/extensions/blue-minimal-header.ts` | Custom header/footer extension |
+| `.pi/agent/extensions/mode-cycle.ts` | Tab-to-cycle agent modes (chat/plan/build/debug) |
 
 
 ## Excluded (sensitive/private)
