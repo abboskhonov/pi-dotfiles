@@ -19,7 +19,6 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
 	CustomEditor,
-	VERSION,
 	type KeybindingsManager,
 	type TUI,
 } from "@earendil-works/pi-coding-agent";
@@ -135,6 +134,11 @@ class OpenCodeEditor extends CustomEditor {
 		this.startBranchRefresh(ctx);
 	}
 
+	/** Override border color so super.render() paints left/right borders in blue */
+	borderColor(text: string): string {
+		return blue(text);
+	}
+
 	setWorking(working: boolean) {
 		this.isWorking = working;
 	}
@@ -202,17 +206,6 @@ class OpenCodeEditor extends CustomEditor {
 		const bottomRight = ` ${slate(tokenStr)} ${slateDim("·")} ${slate(cwd)}${branchStr} `;
 
 		lines[lines.length - 1] = fitBorder(bottomLeft, bottomRight, width, dimBorder, dimBorder);
-
-		// ─── Blue left border accent on all content lines ───
-		// The editor renders │ content │ for each line.
-		// We replace the left "│" with a blue-accented one.
-		for (let i = 1; i < lines.length - 1; i++) {
-			const line = lines[i]!;
-			// Replace first character (left border) with blue version
-			if (line.length > 0) {
-				lines[i] = blue("│") + line.slice(1);
-			}
-		}
 
 		return lines;
 	}
