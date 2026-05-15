@@ -1,7 +1,7 @@
 /**
  * Mode Cycle Extension
  *
- * Shift+Tab cycles through agent modes (chat, plan, build, debug).
+ * Ctrl+Shift+M cycles through agent modes (chat, plan, build, debug).
  * Escape requires 2 presses within 500ms to abort (prevents accidental cancels).
  *
  * Commands:
@@ -10,27 +10,32 @@
  *   /mode-reset    - Clear mode, restore defaults
  *
  * Keys:
- *   Shift+Tab      - cycle to next mode
- *   Escape x2      - abort (within 500ms)
+ *   Ctrl+Shift+M   - cycle to next mode
+ *   Escape x2      - abort (within 500ms, only when agent is working)
  *
  * Config: ~/.pi/agent/modes.json (optional, merges with defaults)
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder, getAgentDir } from "@earendil-works/pi-coding-agent";
+import {
+	CustomEditor,
+	getAgentDir,
+	Key,
+	matchesKey,
+	type KeybindingsManager,
+	type TUI,
+} from "@earendil-works/pi-coding-agent";
+import type { EditorTheme } from "@earendil-works/pi-tui";
 import { Container, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
+import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 
 // ─── Mode Configuration ───
 
 interface Mode {
-	/** Thinking level for this mode */
 	thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-	/** Tools to enable (replaces default set) */
 	tools?: string[];
-	/** Instructions appended to system prompt */
 	instructions?: string;
 }
 
@@ -92,23 +97,72 @@ interface OriginalState {
 	tools: string[];
 }
 
+// ─── Custom Editor with double-escape abort ───
+
+class ModeCycleEditor extends CustomEditor {
+	private ctx: ExtensionContext;
+	private escapeFirstTime = 0;
+	private escapeTimer?: ReturnType<typeof setTimeout>;
+
+	constructor(
+		tui: TUI,
+		theme: EditorTheme,
+		keybindings: KeybindingsManager,
+		ctx: ExtensionContext,
+	) {
+		super(tui, theme, keybindings);
+		this.ctx = ctx;
+	}
+
+	handleInput(data: string): void {
+		// Intercept Escape for double-press abort (only when agent is working)
+		if (matchesKey(data, Key.escape)) {
+			if (this.ctx.isIdle()) {
+				// Agent idle — pass through (preserves double-escape -> /tree, etc.)
+				super.handleInput(data);
+				return;
+			}
+
+			const now = Date.now();
+			if (now - this.escapeFirstTime < 500) {
+				// Double press within 500ms — abort
+				clearTimeout(this.escapeTimer);
+				this.escapeFirstTime = 0;
+				this.ctx.abort();
+				return;
+			}
+
+			// First press — arm the abort and show hint
+			this.escapeFirstTime = now;
+			this.escapeTimer = setTimeout(() => {
+				this.escapeFirstTime = 0;
+			}, 500);
+			this.ctx.ui.notify("Press Escape again to abort", "warning");
+			return;
+		}
+
+		// Any other key resets the escape timer
+		if (this.escapeFirstTime > 0) {
+			clearTimeout(this.escapeTimer);
+			this.escapeFirstTime = 0;
+		}
+
+		super.handleInput(data);
+	}
+
+	dispose(): void {
+		if (this.escapeTimer) {
+			clearTimeout(this.escapeTimer);
+			this.escapeTimer = undefined;
+		}
+	}
+}
+
 export default function modeCycleExtension(pi: ExtensionAPI) {
 	let modes: ModesConfig = {};
 	let activeModeName: string | undefined;
 	let activeMode: Mode | undefined;
 	let originalState: OriginalState | undefined;
-
-	// ─── Double-escape tracking ───
-	let lastEscapeTime = 0;
-	const ESCAPE_WINDOW_MS = 500;
-	let escapeHintTimer: ReturnType<typeof setTimeout> | undefined;
-
-	function clearEscapeHint() {
-		if (escapeHintTimer) {
-			clearTimeout(escapeHintTimer);
-			escapeHintTimer = undefined;
-		}
-	}
 
 	async function applyMode(name: string, mode: Mode, ctx: ExtensionContext): Promise<void> {
 		if (activeModeName === undefined) {
@@ -181,36 +235,11 @@ export default function modeCycleExtension(pi: ExtensionAPI) {
 		ctx.ui.notify(`Mode: ${next}`, "info");
 	}
 
-	// ─── Shift+Tab cycles modes ───
-	pi.registerShortcut("shift+tab", {
+	// ─── Ctrl+Shift+M cycles modes (no built-in conflict) ───
+	pi.registerShortcut("ctrl+shift+m", {
 		description: "Cycle agent mode",
 		handler: async (ctx) => {
 			await cycleMode(ctx);
-		},
-	});
-
-	// ─── Escape requires 2 presses to abort ───
-	pi.registerShortcut("escape", {
-		description: "Double-escape to abort",
-		handler: async (ctx) => {
-			const now = Date.now();
-			if (now - lastEscapeTime < ESCAPE_WINDOW_MS) {
-				// Double press — abort
-				lastEscapeTime = 0;
-				clearEscapeHint();
-				ctx.abort();
-			} else {
-				// First press — arm the abort and show hint
-				lastEscapeTime = now;
-				clearEscapeHint();
-				escapeHintTimer = setTimeout(() => {
-					lastEscapeTime = 0;
-				}, ESCAPE_WINDOW_MS);
-				// Only show hint if agent is active (something to abort)
-				if (!ctx.isIdle()) {
-					ctx.ui.notify("Press Escape again to abort", "warning");
-				}
-			}
 		},
 	});
 
@@ -230,7 +259,6 @@ export default function modeCycleExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			// Show selector
 			const names = Object.keys(modes);
 			if (names.length === 0) {
 				ctx.ui.notify("No modes defined", "warning");
@@ -248,26 +276,26 @@ export default function modeCycleExtension(pi: ExtensionAPI) {
 
 			const result = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
 				const container = new Container();
-				container.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
+				container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 				container.addChild(new Text(theme.fg("accent", theme.bold("Select Mode"))));
 
 				const list = new SelectList(items, Math.min(items.length, 8), {
-					selectedPrefix: (s) => theme.fg("accent", s),
-					selectedText: (s) => theme.fg("accent", s),
-					description: (s) => theme.fg("muted", s),
-					scrollInfo: (s) => theme.fg("dim", s),
-					noMatch: (s) => theme.fg("warning", s),
+					selectedPrefix: (s: string) => theme.fg("accent", s),
+					selectedText: (s: string) => theme.fg("accent", s),
+					description: (s: string) => theme.fg("muted", s),
+					scrollInfo: (s: string) => theme.fg("dim", s),
+					noMatch: (s: string) => theme.fg("warning", s),
 				});
 				list.onSelect = (item) => done(item.value);
 				list.onCancel = () => done(null);
 				container.addChild(list);
 				container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter select • esc cancel")));
-				container.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
+				container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 
 				return {
-					render: (w) => container.render(w),
+					render: (w: number) => container.render(w),
 					invalidate: () => container.invalidate(),
-					handleInput: (data) => {
+					handleInput: (data: string) => {
 						list.handleInput(data);
 						tui.requestRender();
 					},
@@ -321,10 +349,12 @@ export default function modeCycleExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		modes = loadModes(ctx.cwd);
 		updateStatus(ctx);
-	});
 
-	// Cleanup on shutdown
-	pi.on("session_shutdown", async () => {
-		clearEscapeHint();
+		// Install custom editor for double-escape abort (only when editor is available)
+		if (ctx.hasUI) {
+			ctx.ui.setEditorComponent((tui, theme, keybindings) =>
+				new ModeCycleEditor(tui, theme, keybindings, ctx)
+			);
+		}
 	});
 }
