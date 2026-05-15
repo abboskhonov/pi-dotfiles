@@ -1,17 +1,19 @@
 /**
  * Mode Cycle Extension
  *
- * Cycle through agent modes (chat, plan, build, debug) with Tab.
- * Each mode sets thinking level, active tools, and system prompt instructions.
+ * Shift+Tab cycles through agent modes (chat, plan, build, debug).
+ * Escape requires 2 presses within 500ms to abort (prevents accidental cancels).
  *
  * Commands:
  *   /mode          - Show mode selector
  *   /mode <name>   - Switch to mode directly
  *   /mode-reset    - Clear mode, restore defaults
  *
- * Key: Tab - cycle to next mode
+ * Keys:
+ *   Shift+Tab      - cycle to next mode
+ *   Escape x2      - abort (within 500ms)
  *
- * Config: ~/.pi/agent/modes.json
+ * Config: ~/.pi/agent/modes.json (optional, merges with defaults)
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -19,7 +21,7 @@ import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { Container, Key, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
+import { Container, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
 
 // ─── Mode Configuration ───
 
@@ -96,6 +98,18 @@ export default function modeCycleExtension(pi: ExtensionAPI) {
 	let activeMode: Mode | undefined;
 	let originalState: OriginalState | undefined;
 
+	// ─── Double-escape tracking ───
+	let lastEscapeTime = 0;
+	const ESCAPE_WINDOW_MS = 500;
+	let escapeHintTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function clearEscapeHint() {
+		if (escapeHintTimer) {
+			clearTimeout(escapeHintTimer);
+			escapeHintTimer = undefined;
+		}
+	}
+
 	async function applyMode(name: string, mode: Mode, ctx: ExtensionContext): Promise<void> {
 		if (activeModeName === undefined) {
 			originalState = {
@@ -167,11 +181,36 @@ export default function modeCycleExtension(pi: ExtensionAPI) {
 		ctx.ui.notify(`Mode: ${next}`, "info");
 	}
 
-	// ─── Tab cycles modes ───
-	pi.registerShortcut("tab", {
+	// ─── Shift+Tab cycles modes ───
+	pi.registerShortcut("shift+tab", {
 		description: "Cycle agent mode",
 		handler: async (ctx) => {
 			await cycleMode(ctx);
+		},
+	});
+
+	// ─── Escape requires 2 presses to abort ───
+	pi.registerShortcut("escape", {
+		description: "Double-escape to abort",
+		handler: async (ctx) => {
+			const now = Date.now();
+			if (now - lastEscapeTime < ESCAPE_WINDOW_MS) {
+				// Double press — abort
+				lastEscapeTime = 0;
+				clearEscapeHint();
+				ctx.abort();
+			} else {
+				// First press — arm the abort and show hint
+				lastEscapeTime = now;
+				clearEscapeHint();
+				escapeHintTimer = setTimeout(() => {
+					lastEscapeTime = 0;
+				}, ESCAPE_WINDOW_MS);
+				// Only show hint if agent is active (something to abort)
+				if (!ctx.isIdle()) {
+					ctx.ui.notify("Press Escape again to abort", "warning");
+				}
+			}
 		},
 	});
 
@@ -282,5 +321,10 @@ export default function modeCycleExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		modes = loadModes(ctx.cwd);
 		updateStatus(ctx);
+	});
+
+	// Cleanup on shutdown
+	pi.on("session_shutdown", async () => {
+		clearEscapeHint();
 	});
 }
