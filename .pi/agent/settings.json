@@ -1,0 +1,12 @@
+{
+  "lastChangelogVersion": "0.74.0",
+  "theme": "blue-minimal",
+  "defaultProvider": "fireworks",
+  "defaultModel": "accounts/fireworks/routers/kimi-k2p6-turbo",
+  "defaultThinkingLevel": "medium",
+  "packages": [],
+  "terminal": {
+    "showTerminalProgress": true
+  },
+  "hideThinkingBlock": false
+}

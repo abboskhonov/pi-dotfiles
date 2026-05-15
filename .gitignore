@@ -1,0 +1,8 @@
+# Sensitive / private
+.pi/agent/auth.json
+.pi/agent/sessions/
+.pi/agent/paperclips/
+
+# Binaries
+.pi/agent/bin/
+*.exe
