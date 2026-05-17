@@ -1,3 +1,4 @@
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { VERSION } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -93,6 +94,34 @@ function formatCwd(cwd: string): string {
 	return cwd;
 }
 
+function formatNum(n: number): string {
+	if (n < 1000) return `${n}`;
+	if (n < 1000000) return `${(n / 1000).toFixed(1)}k`;
+	return `${(n / 1000000).toFixed(1)}M`;
+}
+
+function getSessionStats(ctx: ExtensionContext) {
+	let input = 0, output = 0, cost = 0;
+	for (const e of ctx.sessionManager.getBranch()) {
+		if (e.type === "message" && e.message.role === "assistant") {
+			const m = e.message as AssistantMessage;
+			input += m.usage?.input ?? 0;
+			output += m.usage?.output ?? 0;
+			cost += m.usage?.cost?.total ?? 0;
+		}
+	}
+	return { input, output, total: input + output, cost };
+}
+
+function getContextStr(ctx: ExtensionContext) {
+	const usage = ctx.getContextUsage();
+	const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow;
+	if (!contextWindow || !usage || usage.percent === null) {
+		return "ctx ?";
+	}
+	return `ctx ${Math.round(usage.percent)}%/${(contextWindow / 1000).toFixed(0)}k`;
+}
+
 // ─── Extension ───
 export default function (pi: ExtensionAPI) {
 	let activeTui: any;
@@ -165,25 +194,32 @@ export default function (pi: ExtensionAPI) {
 				return makeHeader(tui, theme);
 			});
 
-			// Footer: just "● thinking · model" right-aligned
+			// Footer: context + tokens + cost on the left, thinking/model on the right
 			ctx.ui.setFooter((tui, theme, footerData) => {
 				const unsub = footerData.onBranchChange(() => tui.requestRender());
 				return {
 					dispose: unsub,
 					invalidate() {},
 					render(width: number): string[] {
+						const { input, output, total, cost } = getSessionStats(ctx);
 						const level = pi.getThinkingLevel();
 						const dotColor =
 							level === "off"
 								? "dim"
 								: level === "high" || level === "xhigh"
 									? "accent"
-										: "muted";
+											: "muted";
 						const dot = theme.fg(dotColor, "●");
-						const raw = `${dot} ${level} · ${currentModel}`;
-						const right = theme.fg("dim", truncateToWidth(raw, width, ""));
-						const pad = " ".repeat(Math.max(0, width - visibleWidth(right)));
-						return [pad + right];
+						const leftRaw = `${getContextStr(ctx)} · ↑${formatNum(input)} ↓${formatNum(output)} · Σ${formatNum(total)} · $${cost.toFixed(3)}`;
+						const rightRaw = `${dot} ${level} · ${currentModel}`;
+
+						const left = theme.fg("dim", leftRaw);
+						const right = theme.fg("dim", rightRaw);
+
+						const leftW = visibleWidth(left);
+						const rightW = visibleWidth(right);
+						const gap = Math.max(1, width - leftW - rightW);
+						return [left + " ".repeat(gap) + right];
 					},
 				};
 			});
@@ -243,6 +279,7 @@ export default function (pi: ExtensionAPI) {
 						dispose: unsub,
 						invalidate() {},
 						render(width: number): string[] {
+							const { input, output, total, cost } = getSessionStats(ctx);
 							const level = pi.getThinkingLevel();
 							const dotColor =
 								level === "off"
@@ -251,10 +288,16 @@ export default function (pi: ExtensionAPI) {
 										? "accent"
 											: "muted";
 							const dot = theme.fg(dotColor, "●");
-							const raw = `${dot} ${level} · ${currentModel}`;
-							const right = theme.fg("dim", truncateToWidth(raw, width, ""));
-							const pad = " ".repeat(Math.max(0, width - visibleWidth(right)));
-							return [pad + right];
+							const leftRaw = `${getContextStr(ctx)} · ↑${formatNum(input)} ↓${formatNum(output)} · Σ${formatNum(total)} · $${cost.toFixed(3)}`;
+							const rightRaw = `${dot} ${level} · ${currentModel}`;
+
+							const left = theme.fg("dim", leftRaw);
+							const right = theme.fg("dim", rightRaw);
+
+							const leftW = visibleWidth(left);
+							const rightW = visibleWidth(right);
+							const gap = Math.max(1, width - leftW - rightW);
+							return [left + " ".repeat(gap) + right];
 						},
 					};
 				});

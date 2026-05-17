@@ -1,17 +1,3 @@
 {
-  "providers": {
-    "fireworks": {
-      "baseUrl": "https://api.fireworks.ai/inference/v1",
-      "models": [
-        {
-          "id": "accounts/fireworks/routers/kimi-k2p6-turbo",
-          "name": "Kimi K2.6 Turbo",
-          "api": "openai-completions",
-          "contextWindow": 262144,
-          "input": ["text", "image"],
-          "reasoning": true
-        }
-      ]
-    }
-  }
+  "providers": {}
 }
